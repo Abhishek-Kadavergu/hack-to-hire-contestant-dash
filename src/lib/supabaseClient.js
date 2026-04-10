@@ -11,12 +11,22 @@ const mockClient = {
     getSession: async () => ({ data: { session: null } }),
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => { } } } }),
     signUp: async () => { throw new Error("Supabase is not configured properly. Check .env") },
-    signInWithPassword: async () => { throw new Error("Supabase is not configured properly. Check .env") }
+    signInWithPassword: async () => { throw new Error("Supabase is not configured properly. Check .env") },
+    signOut: async () => {}
   },
   from: () => ({
     insert: async () => { throw new Error("Supabase is not configured properly. Check .env") },
     select: () => ({ error: null, data: [] })
-  })
+  }),
+  storage: {
+    from: () => ({
+      upload: async () => { throw new Error("Supabase is not configured properly. Check .env") },
+      getPublicUrl: () => ({ data: { publicUrl: '' } })
+    })
+  },
+  functions: {
+    invoke: async () => { throw new Error("Supabase is not configured properly. Check .env") }
+  }
 };
 
 try {

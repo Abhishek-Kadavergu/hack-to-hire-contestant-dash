@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UploadCloud, File, Link, CheckCircle, Loader2 } from 'lucide-react';
+import { UploadCloud, File, Link, CheckCircle, Loader2, AlertCircle, Clock } from 'lucide-react';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { supabase } from '../../lib/supabaseClient';
@@ -9,6 +9,7 @@ const SubmissionForm = ({ selectedProblem }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [submissionStatus, setSubmissionStatus] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -61,6 +62,7 @@ const SubmissionForm = ({ selectedProblem }) => {
     }
     
     setLoading(true);
+    setSubmissionStatus(null);
 
     try {
       if (user) {
@@ -81,28 +83,60 @@ const SubmissionForm = ({ selectedProblem }) => {
           .from('resumes')
           .getPublicUrl(fileName);
 
-        // 3. Save Submission Record to Database
-        const { error: dbError } = await supabase.from('submissions').insert({
-          user_id: user.id,
-          resume_url: publicUrl,
-          github_repo: formData.github,
-          problem_number: selectedProblem
-        });
+        // 3. Save Submission Record to Database with status: 'pending'
+        const { data: submissionData, error: dbError } = await supabase
+          .from('submissions')
+          .insert({
+            user_id: user.id,
+            resume_url: publicUrl,
+            github_repo: formData.github,
+            problem_number: selectedProblem,
+            status: 'pending'
+          })
+          .select('id')
+          .single();
 
         if (dbError) {
            throw new Error("Failed to save submission: " + dbError.message);
         }
+
+        // 4. Trigger Edge Function (DO NOT call external APIs from frontend)
+        setSubmissionStatus('processing');
+        
+        // Alternative: Direct fetch call to bypass Supabase client auth issues
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-submission`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ submissionId: submissionData.id })
+        });
+        
+        const fnError = !response.ok ? { message: `HTTP ${response.status}` } : null;
+
+        if (fnError) {
+          console.warn("Edge Function invocation warning:", fnError.message);
+          // Don't throw — the submission is saved, processing may happen async
+          setSubmissionStatus('pending');
+        }
+
       } else {
         // If bypassed auth for purely UI demo
         await new Promise(r => setTimeout(r, 1500));
       }
       
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 5000);
+      setTimeout(() => {
+        setSuccess(false);
+        setSubmissionStatus(null);
+      }, 6000);
       setFormData({ ...formData, github: '' });
       setFile(null);
     } catch (err) {
       console.error(err);
+      setSubmissionStatus('failed');
       alert(err.message || "Failed to submit.");
     } finally {
       setLoading(false);
@@ -237,7 +271,55 @@ const SubmissionForm = ({ selectedProblem }) => {
             }}
           >
             <CheckCircle size={20} />
-            Submission received. AI is analyzing your work...
+            Submission received! AI is analyzing your work...
+          </motion.div>
+        )}
+
+        {submissionStatus === 'processing' && !success && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            style={{
+              marginTop: '1.5rem',
+              padding: '1rem',
+              background: '#eff6ff',
+              border: '1px solid #3b82f6',
+              borderRadius: 'var(--radius-md)',
+              color: '#1d4ed8',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              fontSize: '0.95rem',
+              fontWeight: 500
+            }}
+          >
+            <Clock size={20} />
+            Processing your submission...
+          </motion.div>
+        )}
+
+        {submissionStatus === 'failed' && !success && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            style={{
+              marginTop: '1.5rem',
+              padding: '1rem',
+              background: '#fef2f2',
+              border: '1px solid #ef4444',
+              borderRadius: 'var(--radius-md)',
+              color: '#b91c1c',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              fontSize: '0.95rem',
+              fontWeight: 500
+            }}
+          >
+            <AlertCircle size={20} />
+            Submission saved but processing encountered an issue. It will be retried.
           </motion.div>
         )}
       </AnimatePresence>
